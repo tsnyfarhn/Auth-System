@@ -1,0 +1,59 @@
+
+#===============================#
+# FRONTEND
+#===============================#
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+.next/
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment
+.env*
+!.env.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+#===============================#
+# BACKEND
+#===============================#
+
+# .NET build outputs
+[Bb]in/
+[Oo]bj/
+artifacts/
+TestResults/
+publish/
+.vs/
+*.suo
+*.user
+*.rsuser
+*.nupkg
+
+# App settings
+appsettings.json
+appsettings.*.json
+!appsettings.Example.json
