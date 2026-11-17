@@ -1,5 +1,5 @@
-# PRODUCT REQUIREMENTS DOCUMENT (PRD): User Management System
-## Sistem Pengelolaan Pengguna (User Management System )
+# PRODUCT REQUIREMENTS DOCUMENT (PRD): Auth System
+## Sistem Pengelolaan Pengguna (Auth System )
 
 ***Pemilik Produk:** Tsany Farhan
 
@@ -13,7 +13,7 @@
 
 ## 1. Ringkasan (*Summary*)
 
-The User Management System is a web-based application desgined to provide centralized management of user accounts, identitties, authentication, and access control.
+The Auth System is a web-based application desgined to provide centralized management of user accounts, identitties, authentication, and access control.
 
 The system aims to deliver a secure, scalable, and reliable foundation for managing user access accross various business applications, ensuring cosistent account management and steamlined access control within the organization's application system.
 

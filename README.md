@@ -1,6 +1,6 @@
-# USER MANAGEMENT SYSTEM
+# AUTH SYSTEM
 
-User Management System develop with React + Typescript, .NET Core 10 + C#, and PostgreSQL
+Auth System develop with React + Typescript, .NET Core 10 + C#, and PostgreSQL
 
 ## Features
 
