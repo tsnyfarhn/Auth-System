@@ -1,3 +1,4 @@
+using Api.DTOs.Authentication;
 using Api.DTOs.Request.Authentication;
 using Api.DTOs.Response.Authentication;
 using Api.DTOs.Response.Common;
@@ -37,6 +38,26 @@ public class AuthController(AuthService authService) : ControllerBase
                 AccessToken = result.AccessToken!,
                 RefreshToken = result.RefreshToken!
             }
+        });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(RefreshTokenRequest request)
+    {
+        var result = await _authService.LogoutAsync(request);
+
+        if (!result.Success)
+            return Unauthorized(new ApiResponse<object>
+            {
+                Success = result.Success,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = result.Success,
+            Message = result.Message
         });
     }
 }

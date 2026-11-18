@@ -1,4 +1,5 @@
 using Api.Data;
+using Api.DTOs.Authentication;
 using Api.DTOs.Request.Authentication;
 using Api.Models.Entities;
 using Api.Services.Auditing;
@@ -193,5 +194,82 @@ public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettin
         await _context.SaveChangesAsync();
 
         return (true, "Login successful.", accessToken, refreshToken);
+    }
+
+    public async Task<(bool Success, string Message)> LogoutAsync(RefreshTokenRequest request)
+    {
+        var tokenHash = _refreshTokenService.HashToken(request.RefreshToken);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            // --- Find refresh token owner
+            var tokenOwner = await _context.RefreshTokens
+                .AsNoTracking()
+                .Where(rt => rt.Token == tokenHash)
+                .Select(rt => new { rt.UserId })
+                .FirstOrDefaultAsync();
+
+            if (tokenOwner is null)
+                return (false, "Invalid refresh token.");
+
+            // --- Lock and validate user ---
+            var user = await _context.Users
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM auth."user"
+                    WHERE "Id" = {tokenOwner.UserId}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (user is null)
+                return (false, "User not found");
+
+            // --- Lock and validate refresh token transaction ---
+            var storedToken = await _context.RefreshTokens
+                .FromSqlInterpolated($"""
+                    SELECT * 
+                    FROM auth.refresh_token
+                    WHERE "Token" = {tokenHash}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (storedToken is null)
+                return (false, "Invalid refresh token.");
+
+            if (storedToken.RevokedAt is not null)
+                return (false, "Refresh token has alreafy been revoked.");
+
+            if (storedToken.ExpiresAt <= DateTimeOffset.UtcNow)
+                return (false, "Refresh token has expired.");
+
+            // --- Revoke refresh token ---
+            storedToken.RevokedAt = DateTimeOffset.UtcNow;
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            // --- Create auth log ---
+            await _authLogService.LogAsync(
+                user.Id,
+                "LOGOUT_SUCCESS",
+                "User",
+                user.Id,
+                new
+                {
+                    Message = "User logged out successfully."
+                }
+            );
+
+            return (true, "Logout successful.");
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 }
