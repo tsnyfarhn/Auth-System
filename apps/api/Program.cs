@@ -4,6 +4,7 @@ using Api.Data;
 using Api.Services;
 using Api.Services.Auditing;
 using Api.Services.Authentication;
+using Api.Services.Background;
 using Api.Services.Security;
 using Api.Services.UserManagement;
 using Api.Settings;
@@ -78,6 +79,7 @@ builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RefreshTokenService>();
 builder.Services.AddScoped<AuthLogService>();
+builder.Services.AddHostedService<RefreshTokenCleanupService>();
 
 // --- Limiters ---
 builder.Services.AddRateLimiter(options =>

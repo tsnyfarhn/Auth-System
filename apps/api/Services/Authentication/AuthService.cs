@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services.Authentication;
 
-public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettings jwtSettings, PasswordService passwordService, RefreshTokenService refreshTokenService, AuthLogService authLogService, IHttpContextAccessor httpContextAccessor)
+public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettings jwtSettings, PasswordService passwordService, RefreshTokenService refreshTokenService, AuthLogService authLogService, IHttpContextAccessor httpContextAccessor, ILogger<AuthService> logger)
 {
     private readonly AuthDbContext _context = context;
     private readonly JwtService _jwtService = jwtService;
@@ -18,6 +18,7 @@ public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettin
     private readonly RefreshTokenService _refreshTokenService = refreshTokenService;
     private readonly AuthLogService _authLogService = authLogService;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
+    private readonly ILogger<AuthService> _logger = logger;
 
     public async Task<(bool Success, string Message, string? AccessToken, string? RefreshToken)> LoginAsync(LoginRequest request)
     {
@@ -266,9 +267,111 @@ public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettin
 
             return (true, "Logout successful.");
         }
-        catch
+        catch (Exception exception)
         {
             await transaction.RollbackAsync();
+
+            // --- Logger ---
+            _logger.LogError(
+                exception,
+                "Failed to log out user using a refresh token."
+            );
+
+            throw;
+        }
+    }
+
+    public async Task<(bool Success, string Message)> LogoutAllAsync(RefreshTokenRequest request)
+    {
+        var tokenHash = _refreshTokenService.HashToken(request.RefreshToken);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            // --- Find refresh token owner
+            var tokenOwner = await _context.RefreshTokens
+                .AsNoTracking()
+                .Where(rt => rt.Token == tokenHash)
+                .Select(rt => new { rt.UserId })
+                .FirstOrDefaultAsync();
+
+            if (tokenOwner is null)
+                return (false, "Invalid refresh token.");
+
+            // --- Lock and validate user ---
+            var user = await _context.Users
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM auth."user"
+                    WHERE "Id" = {tokenOwner.UserId}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (user is null)
+                return (false, "User not found");
+
+            // --- Lock and validate refresh token transaction ---
+            var storedToken = await _context.RefreshTokens
+                .FromSqlInterpolated($"""
+                    SELECT * 
+                    FROM auth.refresh_token
+                    WHERE "Token" = {tokenHash}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (storedToken is null)
+                return (false, "Invalid refresh token.");
+
+            if (storedToken.RevokedAt is not null)
+                return (false, "Refresh token has alreafy been revoked.");
+
+            if (storedToken.ExpiresAt <= DateTimeOffset.UtcNow)
+                return (false, "Refresh token has expired.");
+
+            // --- Get and revoke all active refresh tokens ---
+            var activeTokens = await _context.RefreshTokens
+                .Where(rt =>
+                    rt.UserId == storedToken.UserId &&
+                    rt.RevokedAt == null &&
+                    rt.ExpiresAt > DateTimeOffset.UtcNow)
+                .ToListAsync();
+
+            foreach (var token in activeTokens)
+            {
+                token.RevokedAt = DateTimeOffset.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            // --- Create auth log ---
+            await _authLogService.LogAsync(
+                user.Id,
+                "LOGIN_ALL_SUCCESS",
+                "User",
+                user.Id,
+                new
+                {
+                    Message = "User logged out from all devices successfully.",
+                    RevokedSessions = activeTokens.Count
+                }
+            );
+
+            return (true, "Logout from all devices successful.");
+        }
+        catch (Exception exception)
+        {
+            await transaction.RollbackAsync();
+
+            // --- Logger ---
+            _logger.LogError(
+                exception,
+                "Failed to log out user from all devices."
+            );
+
             throw;
         }
     }

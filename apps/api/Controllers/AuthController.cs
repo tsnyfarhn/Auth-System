@@ -60,4 +60,24 @@ public class AuthController(AuthService authService) : ControllerBase
             Message = result.Message
         });
     }
+
+    [AllowAnonymous]
+    [HttpPost("logout-all")]
+    public async Task<IActionResult> LogoutAll(RefreshTokenRequest request)
+    {
+        var result = await _authService.LogoutAllAsync(request);
+
+        if (!result.Success)
+            return Unauthorized(new ApiResponse<object>
+            {
+                Success = result.Success,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = result.Success,
+            Message = result.Message
+        });
+    }
 }
