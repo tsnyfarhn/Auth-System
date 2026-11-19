@@ -4,10 +4,11 @@ using Api.Models.Entities;
 
 namespace Api.Services.Auditing;
 
-public class AuthLogService(AuthDbContext context, IHttpContextAccessor httpContextAccessor)
+public class AuthLogService(AuthDbContext context, IHttpContextAccessor httpContextAccessor, ILogger<AuthLogService> logger)
 {
     private readonly AuthDbContext _context = context;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
+    private readonly ILogger<AuthLogService> _logger = logger;
 
     public async Task LogAsync(Guid? userId, string action, string? targetType = null, Guid? targetId = null, object? details = null)
     {
@@ -25,8 +26,22 @@ public class AuthLogService(AuthDbContext context, IHttpContextAccessor httpCont
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        _context.AuthLogs.Add(authLog);
+        try
+        {
+            _context.AuthLogs.Add(authLog);
 
-        await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to save authentication audit log for action {Action}.",
+                action
+            );
+
+            throw;
+        }
+
     }
 }
