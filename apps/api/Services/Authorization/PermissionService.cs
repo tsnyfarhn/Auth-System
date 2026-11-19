@@ -4,14 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services;
 
-public class PermissionService
+public class PermissionService(AuthDbContext context)
 {
-    private readonly AuthDbContext _context;
-
-    public PermissionService(AuthDbContext context)
-    {
-        _context = context;
-    }
+    private readonly AuthDbContext _context = context;
 
     public async Task<List<PermissionResponse>> GetAllPermissionAsync()
     {
