@@ -30,6 +30,15 @@ builder.Services.Configure<JwtSettings>(
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<IOptions<JwtSettings>>().Value
 );
+
+// --- OTP Settings ---
+builder.Services.Configure<OtpSettings>(
+    builder.Configuration.GetSection("OtpSettings")
+);
+
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<IOptions<OtpSettings>>().Value
+);
 #endregion
 
 // --- JWT Authentication ---
@@ -79,6 +88,9 @@ builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RefreshTokenService>();
 builder.Services.AddScoped<AuthLogService>();
+builder.Services.AddScoped<EmailVerificationService>();
+builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<OtpService>();
 builder.Services.AddHostedService<RefreshTokenCleanupService>();
 
 // --- Limiters ---

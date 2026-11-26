@@ -11,9 +11,10 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/v1/auth")]
-public class AuthController(AuthService authService) : ControllerBase
+public class AuthController(AuthService authService, EmailVerificationService emailVerificationService) : ControllerBase
 {
     private readonly AuthService _authService = authService;
+    private readonly EmailVerificationService _emailVerificationService = emailVerificationService;
 
     [AllowAnonymous]
     [HttpPost("login")]
@@ -77,6 +78,66 @@ public class AuthController(AuthService authService) : ControllerBase
         return Ok(new ApiResponse<object>
         {
             Success = result.Success,
+            Message = result.Message
+        });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("register")]
+    public async Task<IActionResult> Register(RegisterRequest request)
+    {
+        var result = await _authService.RegisterAsync(request);
+
+        if (!result.Success)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = true,
+            Message = result.Message
+        });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("verify-email")]
+    public async Task<IActionResult> VerifyEmail(VerifyEmailRequest request)
+    {
+        var result = await _emailVerificationService.VerifyEmailAsync(request);
+
+        if (!result.Success)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = true,
+            Message = result.Message
+        });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("resend-verify")]
+    public async Task<IActionResult> ResendVerifyEmail(ResendVerifyRequest request)
+    {
+        var result = await _emailVerificationService.ResendOtpEmailAsync(request.Email);
+
+        if (!result.Success)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = false,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = true,
             Message = result.Message
         });
     }

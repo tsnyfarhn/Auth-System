@@ -9,14 +9,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services.Authentication;
 
-public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettings jwtSettings, PasswordService passwordService, RefreshTokenService refreshTokenService, AuthLogService authLogService, IHttpContextAccessor httpContextAccessor, ILogger<AuthService> logger)
+public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettings jwtSettings, PasswordService passwordService, RefreshTokenService refreshTokenService, EmailVerificationService emailVerificationService, AuthLogService authLogService, IConfiguration config, IHttpContextAccessor httpContextAccessor, ILogger<AuthService> logger)
 {
     private readonly AuthDbContext _context = context;
     private readonly JwtService _jwtService = jwtService;
     private readonly JwtSettings _jwtSettings = jwtSettings;
     private readonly PasswordService _passwordService = passwordService;
     private readonly RefreshTokenService _refreshTokenService = refreshTokenService;
+    private readonly EmailVerificationService _emailVerificationService = emailVerificationService;
     private readonly AuthLogService _authLogService = authLogService;
+    private readonly IConfiguration _config = config;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
     private readonly ILogger<AuthService> _logger = logger;
 
@@ -374,5 +376,81 @@ public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettin
 
             throw;
         }
+    }
+
+    public async Task<(bool Success, string Message)> RegisterAsync(RegisterRequest request)
+    {
+        // --- Request data ---
+        var email = request.Email.Trim();
+        var normalizedEmail = email.ToUpperInvariant();
+        var passwordHash = _passwordService.HashPassword(request.Password);
+
+        // --- Validate domain configured ---
+        var allowedDomain = _config["AllowedRegistration:EmailDomain"] ??
+            throw new InvalidOperationException("Registration email domain is not configured.");
+
+        // --- Validate company email address ---
+        var emailParts = email.Split('@');
+
+        if (emailParts.Length != 2 ||
+            string.IsNullOrWhiteSpace(emailParts[0]) ||
+            !emailParts[1].Equals(allowedDomain.Trim(), StringComparison.OrdinalIgnoreCase)
+        )
+            return (false, "Only company email addresses are allowd.");
+
+        // --- Validate email exist ---
+        var emailExists = await _context.Users.AnyAsync(u => u.NormalizedEmail == normalizedEmail);
+
+        if (emailExists)
+            return (false, "Email is already registered.");
+
+        // --- Validate default role ---
+        var employeeRole = await _context.Roles.FirstOrDefaultAsync(r => r.NormalizedName == "EMPLOYEE") ??
+            throw new InvalidOperationException("Default Employee role was not found.");
+
+        // --- Create user ---
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = email,
+            NormalizedEmail = normalizedEmail,
+            Password = passwordHash,
+            EmailConfirmed = false,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        // --- Assign default role
+        var userRole = new UserRole
+        {
+            UserId = user.Id,
+            RoleId = employeeRole.Id,
+            AssignedBy = user.Id,
+            AssignedAt = DateTimeOffset.UtcNow
+        };
+
+        // --- Save to database ---
+        _context.Users.Add(user);
+        _context.UserRoles.Add(userRole);
+
+        await _context.SaveChangesAsync();
+
+        // --- Create auth log ---
+        await _authLogService.LogAsync(
+            user.Id,
+            "REGISTER_SUCCESS",
+            "User",
+            user.Id,
+            new
+            {
+                Message = "User registered succcessfully."
+            }
+        );
+
+        // --- Send email verification ---
+        await _emailVerificationService.SendOtpEmailAsync(user);
+
+        return (true, "Registration successful. Please check your email to verify your account.");
     }
 }
