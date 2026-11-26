@@ -141,4 +141,29 @@ public class AuthController(AuthService authService, EmailVerificationService em
             Message = result.Message
         });
     }
+
+    [AllowAnonymous]
+    [HttpPost("refresh-token")]
+    public async Task<IActionResult> RefreshToken(RefreshTokenRequest request)
+    {
+        var result = await _authService.RefreshTokenAsync(request);
+
+        if (!result.Success)
+            return BadRequest(new ApiResponse<object>
+            {
+                Success = result.Success,
+                Message = result.Message
+            });
+
+        return Ok(new ApiResponse<object>
+        {
+            Success = result.Success,
+            Message = result.Message,
+            Data = new TokenResponse
+            {
+                AccessToken = result.AccessToken!,
+                RefreshToken = result.RefreshToken!
+            }
+        });
+    }
 }

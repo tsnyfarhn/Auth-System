@@ -453,4 +453,142 @@ public class AuthService(AuthDbContext context, JwtService jwtService, JwtSettin
 
         return (true, "Registration successful. Please check your email to verify your account.");
     }
+
+    public async Task<(bool Success, string Message, string? AccessToken, string? RefreshToken)> RefreshTokenAsync(RefreshTokenRequest request)
+    {
+        var tokenHash = _refreshTokenService.HashToken(request.RefreshToken);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            // --- Find and validate refresh token owner ---
+            var tokenOwner = await _context.RefreshTokens
+                .AsNoTracking()
+                .Where(rt => rt.Token == tokenHash)
+                .Select(rt => new { rt.UserId })
+                .FirstOrDefaultAsync();
+
+            if (tokenOwner is null)
+                return (false, "Invalid refresh token.", null, null);
+
+            // --- Lock and validate user ---
+            var user = await _context.Users
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM auth.user
+                    WHERE "Id" = {tokenOwner.UserId}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (user is null)
+                return (false, "User not found.", null, null);
+
+            // --- Lock refresh token transaction and validate ---
+            var storedToken = await _context.RefreshTokens
+                .FromSqlInterpolated($"""
+                    SELECT * 
+                    FROM auth.refresh_token
+                    WHERE "Token" = {tokenHash}
+                    FOR UPDATE
+                """)
+                .FirstOrDefaultAsync();
+
+            if (storedToken is null)
+                return (false, "Invalid refresh token.", null, null);
+
+            if (storedToken.RevokedAt is not null)
+            {
+                // --- Check refresh token reuse and revoke all active refresh tokens ---
+                if (storedToken.ReplacedByTokenId is not null)
+                {
+                    var activeTokens = await _context.RefreshTokens
+                        .Where(rt =>
+                            rt.UserId == storedToken.UserId &&
+                            rt.RevokedAt == null)
+                        .ToListAsync();
+
+                    foreach (var token in activeTokens)
+                    {
+                        token.RevokedAt = DateTimeOffset.UtcNow;
+                    }
+
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    // --- Create auth log ---
+                    await _authLogService.LogAsync(
+                        user.Id,
+                        "REFRESH_TOKEN_REUSE_DETECTED",
+                        "User",
+                        user.Id,
+                        new
+                        {
+                            Message = "Refresh token reuse detected. All sessions have been revoked."
+                        }
+                    );
+
+                    return (false, "Refresh token reuse detected. All sessions have been revoked.", null, null);
+                }
+
+                return (false, "Refresh token has been revoked.", null, null);
+            }
+
+            if (storedToken.ExpiresAt <= DateTimeOffset.UtcNow)
+                return (false, "Refresh token has expired.", null, null);
+
+            if (!user.EmailConfirmed)
+                return (false, "Email has not been verified.", null, null);
+
+            if (!user.IsActive)
+                return (false, "User account is inactive.", null, null);
+
+            // --- Revoke old refresh token ---
+            storedToken.RevokedAt = DateTimeOffset.UtcNow;
+
+            // --- Generate new token ---
+            var accessToken = _jwtService.GenerateAccessToken(user);
+
+            var newRefreshToken = _refreshTokenService.GenerateToken();
+            var newRefreshTokenHash = _refreshTokenService.HashToken(newRefreshToken);
+
+            var newRefreshTokenEntity = new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Token = newRefreshTokenHash,
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays),
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedByIp = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString()
+            };
+
+            // --- Link old token to new token ---
+            storedToken.ReplacedByTokenId = newRefreshTokenEntity.Id;
+
+            _context.RefreshTokens.Add(newRefreshTokenEntity);
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            // --- Create auth log ---
+            await _authLogService.LogAsync(
+                user.Id,
+                "REFRESH_TOKEN_SUCCESS",
+                "User",
+                user.Id,
+                new
+                {
+                    Message = "Refresh token successfully rotated."
+                }
+            );
+
+            return (true, "Token refreshed successfully.", accessToken, newRefreshToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 }
